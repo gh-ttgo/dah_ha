@@ -1,0 +1,13 @@
+{
+  "domain": "dahsolar",
+  "name": "DAH Solar (unofficial)",
+  "version": "1.0.0",
+  "documentation": "https://github.com/gh-ttgo/dah_ha",
+  "requirements": [
+    "cryptography>=3.4",
+    "aiohttp>=3.8"
+  ],
+  "dependencies": [],
+  "codeowners": ["@gh-ttgo"],
+  "iot_class": "cloud_polling"
+}
