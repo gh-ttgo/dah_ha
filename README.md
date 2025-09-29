@@ -60,8 +60,6 @@ After restart, the following sensors will be created:
 * `sensor.dah_today_yield` (kWh, resets daily)
 * `sensor.dah_power` (W)
 * `sensor.dah_installed_capacity` (kWp)
-* `sensor.dah_state`
-* `sensor.dah_latitude` / `sensor.dah_longitude`
 * `sensor.dah_uptime_days`
 * `sensor.dah_normal_devices`
 * `sensor.dah_offline_devices`
