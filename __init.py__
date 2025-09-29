@@ -1,0 +1,23 @@
+from __future__ import annotations
+import logging
+from homeassistant.const import CONF_USERNAME, CONF_PASSWORD
+
+DOMAIN = "dahsolar"
+_LOGGER = logging.getLogger(__name__)
+
+
+async def async_setup(hass, config):
+    if DOMAIN not in config:
+        return True
+
+    username = config[DOMAIN].get(CONF_USERNAME)
+    password = config[DOMAIN].get(CONF_PASSWORD)
+
+    from .coordinator import DAHDataUpdateCoordinator
+
+    coordinator = DAHDataUpdateCoordinator(hass, username, password)
+    await coordinator.async_prepare()
+    hass.data.setdefault(DOMAIN, {})["coordinator"] = coordinator
+
+    hass.helpers.discovery.load_platform("sensor", DOMAIN, {}, config)
+    return True
