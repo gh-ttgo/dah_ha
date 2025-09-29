@@ -81,7 +81,7 @@ After restart, the following sensors will be created:
 
 Here’s how the DAH Solar sensors look inside Home Assistant:
 
-![DAH Solar Sensors](https://raw.githubusercontent.com/<yourusername>/dahsolar-homeassistant/main/docs/screenshot.png)
+![DAH Solar Sensors](https://raw.githubusercontent.com/gh-ttgo/dah_ha/main/docs/screenshot.png)
 
 ---
 
