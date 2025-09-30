@@ -5,6 +5,9 @@ import base64
 import logging
 
 import aiohttp
+
+from datetime import timedelta
+
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
@@ -18,16 +21,21 @@ _LOGGER = logging.getLogger(__name__)
 class AuthError(Exception):
     pass
 
-
 class DAHDataUpdateCoordinator(DataUpdateCoordinator):
     def __init__(self, hass, username: str, password: str):
-        super().__init__(hass, _LOGGER, name="dahsolar", update_interval=None)
+        super().__init__(
+            hass,
+            _LOGGER,
+            name="dahsolar",
+            update_interval=timedelta(minutes=1),  # or timedelta(seconds=60)
+        )
         self.hass = hass
         self.username = username
         self.password = password
-        self._session: aiohttp.ClientSession | None = None
-        self._token: str | None = None
-        self._station_id: int | None = None
+        self._session = None
+        self._token = None
+        self._station_id = None
+
 
     async def async_prepare(self) -> None:
         await self._ensure_session()
@@ -91,7 +99,6 @@ class DAHDataUpdateCoordinator(DataUpdateCoordinator):
         if not token:
             raise AuthError("No token in login response")
         self._token = token
-        self.update_interval = 60
 
         headers = {
             "Authorization": f"Bearer {self._token}",
@@ -120,20 +127,23 @@ class DAHDataUpdateCoordinator(DataUpdateCoordinator):
         await self._ensure_session()
         if not self._token:
             await self.login()
-        if not self._station_id:
-            raise AuthError("No stationId available")
 
         headers = {"Authorization": f"Bearer {self._token}"}
-        base = API_BASE + "stationBoard/"
 
-        station_info = await self._fetch_json(f"{base}stationInfo?stationId={self._station_id}&lang=1", headers)
-        equipment_stat = await self._fetch_json(f"{base}equipmentStatistic?stationId={self._station_id}&lang=1", headers)
-        station_state = await self._fetch_json(f"{base}stationState?stationId={self._station_id}&lang=1", headers)
+        async def _get(url):
+            async with self._session.get(url, headers=headers) as resp:
+                if resp.status in (401, 403):
+                    _LOGGER.warning("Token expired, re-logging in")
+                    await self.login()
+                    new_headers = {"Authorization": f"Bearer {self._token}"}
+                    async with self._session.get(url, headers=new_headers) as retry_resp:
+                        return await retry_resp.json()
+                return await resp.json()
 
-        _LOGGER.debug("stationInfo: %s", station_info)
-        _LOGGER.debug("equipmentStatistic: %s", equipment_stat)
-        _LOGGER.debug("stationState: %s", station_state)
-      
+        station_info = await _get(API_BASE + f"stationBoard/stationInfo?stationId={self._station_id}&lang=1")
+        equipment_stat = await _get(API_BASE + f"stationBoard/equipmentStatistic?stationId={self._station_id}&lang=1")
+        station_state = await _get(API_BASE + f"stationBoard/stationState?stationId={self._station_id}&lang=1")
+
         return {
             "stationInfo": station_info,
             "equipmentStatistic": equipment_stat,
