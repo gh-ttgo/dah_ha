@@ -53,7 +53,6 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
 
     async_add_entities(sensors, True)
 
-
 class DAHValueSensor(SensorEntity):
     def __init__(self, coordinator, key, unit, name=None,
                  device_class=None, state_class=None):
@@ -65,17 +64,20 @@ class DAHValueSensor(SensorEntity):
         self._attr_device_class = device_class
         self._attr_state_class = state_class
 
+        # auto-update when coordinator refreshes
+        self.coordinator.async_add_listener(self.async_write_ha_state)
+
     @property
     def native_value(self):
         if not self.coordinator.data:
             return None
-
         data = {}
-        data.update(self.coordinator.data.get("stationInfo", {}).get("data", {}))
-        data.update(self.coordinator.data.get("equipmentStatistic", {}).get("data", {}))
-        data.update(self.coordinator.data.get("stationState", {}).get("data", {}))
-
+        data.update(self.coordinator.data.get("stationInfo", {}).get("data", {}) or {})
+        data.update(self.coordinator.data.get("equipmentStatistic", {}).get("data", {}) or {})
+        data.update(self.coordinator.data.get("stationState", {}).get("data", {}) or {})
+        # keep this if your coordinator returns stationList
+        data.update(self.coordinator.data.get("stationList", {}).get("data", {}) or {})
         return data.get(self.key)
 
-    async def async_update(self):
-        await self.coordinator.async_request_refresh()
+    # remove async_update(); the listener handles state writes
+
