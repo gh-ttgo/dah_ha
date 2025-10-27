@@ -63,23 +63,31 @@ class DAHDataUpdateCoordinator(DataUpdateCoordinator):
                 _LOGGER.warning("Failed to fetch %s: %s", js_url, e)
                 continue
 
-            # Try to find either S1e=... or A1e=... (RSA public key)
-            m = re.search(r'(S1e|A1e)\s*=\s*"([A-Za-z0-9+/=]{100,})"', js_text)
-            if not m:
-                continue
-
-            b64 = m.group(2)
-            _LOGGER.debug("Extracted public key base64: %s...", b64[:40])
-
-            pem = (
-                "-----BEGIN PUBLIC KEY-----\n"
-                + "\n".join([b64[i:i+64] for i in range(0, len(b64), 64)])
-                + "\n-----END PUBLIC KEY-----\n"
+            # General pattern: look for any base64-looking string used in setPublicKey
+            m = re.search(
+                r'setPublicKey\(["\']([A-Za-z0-9+/=]{100,})["\']\)', js_text
             )
-            return pem
+            if not m:
+                # Fallback: any long base64 string assigned to a variable near .setPublicKey
+                m = re.search(
+                    r'([A-Za-z0-9_]+)\s*=\s*["\']([A-Za-z0-9+/=]{100,})["\'].*?setPublicKey\(\1\)',
+                    js_text,
+                    re.DOTALL,
+                )
+
+            if m:
+                # Group 1 or 2 may contain the base64 depending on match
+                b64 = m.group(1) if len(m.groups()) == 1 else m.group(2)
+                _LOGGER.debug("Extracted public key base64: %s...", b64[:40])
+
+                pem = (
+                    "-----BEGIN PUBLIC KEY-----\n"
+                    + "\n".join([b64[i:i+64] for i in range(0, len(b64), 64)])
+                    + "\n-----END PUBLIC KEY-----\n"
+                )
+                return pem
 
         raise AuthError("Public key not found in any js bundle")
-
 
     async def login(self) -> None:
         await self._ensure_session()
