@@ -6,6 +6,9 @@ import logging
 
 import aiohttp
 
+import asyncio
+from aiohttp import ClientError, ClientTimeout
+
 from datetime import timedelta
 
 from cryptography.hazmat.primitives import serialization
@@ -41,9 +44,11 @@ class DAHDataUpdateCoordinator(DataUpdateCoordinator):
         await self._ensure_session()
         await self.login()
 
+    # replace your _ensure_session with this
     async def _ensure_session(self) -> None:
-        if self._session is None:
-            self._session = aiohttp.ClientSession()
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession(timeout=ClientTimeout(total=20))
+
 
     async def _fetch_public_key(self) -> str:
         await self._ensure_session()
@@ -88,6 +93,7 @@ class DAHDataUpdateCoordinator(DataUpdateCoordinator):
                 return pem
 
         raise AuthError("Public key not found in any js bundle")
+
 
     async def login(self) -> None:
         await self._ensure_session()
@@ -138,29 +144,91 @@ class DAHDataUpdateCoordinator(DataUpdateCoordinator):
                     return await resp2.json()
             return await resp.json()
 
-    async def _async_update_data(self):
+    # add this helper (place next to _fetch_json or replace it entirely)
+    async def _request_json(self, url: str, headers: dict | None = None, retry: bool = True) -> dict:
         await self._ensure_session()
+        try:
+            async with self._session.get(url, headers=headers) as resp:
+                text = await resp.text()
+                # token expired or HTML login page
+                if resp.status in (401, 403) or text.lstrip().startswith("<!DOCTYPE html>"):
+                    _LOGGER.warning("Auth expired or HTML response, re-logging in")
+                    await self.login()
+                    headers = {"Authorization": f"Bearer {self._token}"}
+                    async with self._session.get(url, headers=headers) as r2:
+                        return await r2.json(content_type=None)
+                return await resp.json(content_type=None)
+        except (asyncio.TimeoutError, ClientError) as e:
+            if retry:
+                _LOGGER.warning("Network error %s, recreating session and retrying once", e)
+                try:
+                    await self._session.close()
+                except Exception:
+                    pass
+                self._session = None
+                await self._ensure_session()
+                # optional: re-login after long outages
+                if not self._token:
+                    await self.login()
+                return await self._request_json(url, headers, retry=False)
+            raise
+
+    async def _async_update_data(self):
+        """Fetch and update DAH Solar station data safely."""
+        await self._ensure_session()
+
         if not self._token:
             await self.login()
+        if not self._station_id:
+            raise AuthError("No stationId available")
 
         headers = {"Authorization": f"Bearer {self._token}"}
+        base = API_BASE + "stationBoard/"
 
-        async def _get(url):
-            async with self._session.get(url, headers=headers) as resp:
-                if resp.status in (401, 403):
-                    _LOGGER.warning("Token expired, re-logging in")
-                    await self.login()
-                    new_headers = {"Authorization": f"Bearer {self._token}"}
-                    async with self._session.get(url, headers=new_headers) as retry_resp:
-                        return await retry_resp.json()
-                return await resp.json()
+        async def _get_json(url: str, retry: bool = True):
+            """Helper that retries once on network or auth errors."""
+            await self._ensure_session()
+            try:
+                async with self._session.get(url, headers=headers) as resp:
+                    text = await resp.text()
 
-        station_info = await _get(API_BASE + f"stationBoard/stationInfo?stationId={self._station_id}&lang=1")
-        equipment_stat = await _get(API_BASE + f"stationBoard/equipmentStatistic?stationId={self._station_id}&lang=1")
-        station_state = await _get(API_BASE + f"stationBoard/stationState?stationId={self._station_id}&lang=1")
+                    # Token expired or HTML instead of JSON → re-login and retry once
+                    if resp.status in (401, 403) or text.lstrip().startswith("<!DOCTYPE html>"):
+                        _LOGGER.warning("Token expired or HTML login page received, re-logging in")
+                        await self.login()
+                        new_headers = {"Authorization": f"Bearer {self._token}"}
+                        async with self._session.get(url, headers=new_headers) as retry_resp:
+                            return await retry_resp.json(content_type=None)
+
+                    return await resp.json(content_type=None)
+
+            except (asyncio.TimeoutError, aiohttp.ClientError) as e:
+                if retry:
+                    _LOGGER.warning("Network error %s, recreating session and retrying once", e)
+                    try:
+                        await self._session.close()
+                    except Exception:
+                        pass
+                    self._session = None
+                    await self._ensure_session()
+                    # optional re-login after long outages
+                    if not self._token:
+                        await self.login()
+                    return await _get_json(url, retry=False)
+                raise
+
+        # --- actual API calls ---
+        station_info = await _get_json(f"{base}stationInfo?stationId={self._station_id}&lang=1")
+        equipment_stat = await _get_json(f"{base}equipmentStatistic?stationId={self._station_id}&lang=1")
+        station_state = await _get_json(f"{base}stationState?stationId={self._station_id}&lang=1")
+
+        _LOGGER.debug("stationInfo: %s", station_info)
+        _LOGGER.debug("equipmentStatistic: %s", equipment_stat)
+        _LOGGER.debug("stationState: %s", station_state)
 
         return {
             "stationInfo": station_info,
             "equipmentStatistic": equipment_stat,
             "stationState": station_state,
         }
+

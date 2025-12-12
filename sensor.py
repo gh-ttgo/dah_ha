@@ -27,7 +27,8 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
                        device_class="energy", state_class="total_increasing"),
 
         DAHValueSensor(coordinator, "electricity", "kWh",
-                       name="DAH Today Yield"),
+                       name="DAH Today Yield"
+                       state_class="measurement"),
 
         DAHValueSensor(coordinator, "power", "W",
                        name="DAH Power",
